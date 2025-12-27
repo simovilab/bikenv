@@ -173,4 +173,4 @@ poetry.toml
 # ruff
 .ruff_cache/
 
-# End of https://www.toptal.com/developers/gitignore/api/python
+# End of https://www.toptal.com/developers/gitignore/api/pythonresults/
