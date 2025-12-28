@@ -19,11 +19,34 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score
 import os
 import sys
+import signal
+import time
+from contextlib import contextmanager
 
 # Add parent directory to path to import bikenv
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from scripts.calculate_indices import calculate_indices_for_city
+
+
+class TimeoutException(Exception):
+    """Exception raised when operation times out"""
+    pass
+
+
+@contextmanager
+def time_limit(seconds):
+    """Context manager to limit execution time"""
+    def signal_handler(signum, frame):
+        raise TimeoutException(f"Timed out after {seconds} seconds")
+    
+    # Set the signal handler and alarm
+    signal.signal(signal.SIGALRM, signal_handler)
+    signal.alarm(seconds)
+    try:
+        yield
+    finally:
+        signal.alarm(0)  # Disable the alarm
 
 
 def load_bicycle_index_data(filepath: str) -> pd.DataFrame:
@@ -57,25 +80,73 @@ def calculate_indices_for_cities(df: pd.DataFrame, sample_size: int = 15) -> pd.
     
     sampled_df = pd.concat([top_cities, middle_cities, lower_cities]).reset_index(drop=True)
     
-    print(f"\nCalculating indices for {len(sampled_df)} cities...")
-    print("This may take several minutes...\n")
+    total_cities = len(sampled_df)
+    print(f"\nCalculating indices for {total_cities} cities...", flush=True)
+    print("This may take several minutes...", flush=True)
+    print("(Cities with very large areas will be skipped automatically)", flush=True)
+    print(f"\n{'='*70}", flush=True)
     
     altitude_indices = []
     distance_indices = []
+    successful_count = 0
+    failed_cities = []
     
     for idx, row in sampled_df.iterrows():
         city = row['city']
         country = row['country']
+        city_num = idx + 1
+        
+        print(f"\n[{city_num}/{total_cities}] Processing: {city}, {country}", flush=True)
+        start_time = time.time()
         
         try:
-            a_i, d_i = calculate_indices_for_city(city, country)
-            altitude_indices.append(a_i)
-            distance_indices.append(d_i)
-            a_i_str = f"{a_i:.3f}" if a_i is not None else 'N/A'
-            d_i_str = f"{d_i:.3f}" if d_i is not None else 'N/A'
-            print(f"  ✓ {city}: A_i={a_i_str}, D_i={d_i_str}")
+            # Set timeout to 5 minutes per city (300 seconds)
+            # Cities like Québec that take too long will be skipped
+            print(f"  → Downloading network data...", flush=True)
+            with time_limit(300):
+                a_i, d_i = calculate_indices_for_city(city, country)
+                elapsed = time.time() - start_time
+                
+                if a_i is not None and d_i is not None:
+                    altitude_indices.append(a_i)
+                    distance_indices.append(d_i)
+                    a_i_str = f"{a_i:.3f}"
+                    d_i_str = f"{d_i:.3f}"
+                    print(f"  ✓ SUCCESS: A_i={a_i_str}, D_i={d_i_str} (took {elapsed:.1f}s)", flush=True)
+                    successful_count += 1
+                else:
+                    elapsed = time.time() - start_time
+                    print(f"  ✗ FAILED: Calculation returned None (took {elapsed:.1f}s)", flush=True)
+                    altitude_indices.append(None)
+                    distance_indices.append(None)
+                    failed_cities.append(f"{city} (returned None)")
+                    
+        except TimeoutException as e:
+            elapsed = time.time() - start_time
+            print(f"  ✗ SKIPPED: Area too large, would take >5 minutes (stopped at {elapsed:.1f}s)", flush=True)
+            altitude_indices.append(None)
+            distance_indices.append(None)
+            failed_cities.append(f"{city} (timeout)")
+            
+        except KeyboardInterrupt:
+            elapsed = time.time() - start_time
+            print(f"\n  ⚠ INTERRUPTED by user at {elapsed:.1f}s", flush=True)
+            print(f"\nStopping analysis. Processed {successful_count}/{city_num} cities so far.", flush=True)
+            # Add None for remaining cities
+            remaining = len(sampled_df) - len(altitude_indices)
+            altitude_indices.extend([None] * remaining)
+            distance_indices.extend([None] * remaining)
+            break
+            
         except Exception as e:
-            print(f"  ✗ {city}: Error - {e}")
+            elapsed = time.time() - start_time
+            error_msg = str(e)
+            if "900 times your configured" in error_msg:
+                print(f"  ✗ SKIPPED: Area too large for Overpass API (at {elapsed:.1f}s)", flush=True)
+                failed_cities.append(f"{city} (area too large)")
+            else:
+                print(f"  ✗ ERROR: {error_msg[:100]} (at {elapsed:.1f}s)", flush=True)
+                failed_cities.append(f"{city} ({type(e).__name__})")
             altitude_indices.append(None)
             distance_indices.append(None)
     
@@ -83,9 +154,17 @@ def calculate_indices_for_cities(df: pd.DataFrame, sample_size: int = 15) -> pd.
     sampled_df['distance_index'] = distance_indices
     
     # Remove cities where calculation failed
+    original_count = len(sampled_df)
     sampled_df = sampled_df.dropna(subset=['altitude_index', 'distance_index'])
     
-    print(f"\nSuccessfully calculated indices for {len(sampled_df)} cities")
+    print(f"\n{'='*70}", flush=True)
+    print(f"SUMMARY: Successfully calculated indices for {len(sampled_df)}/{original_count} cities", flush=True)
+    
+    if failed_cities:
+        print(f"\nSkipped cities ({len(failed_cities)}):", flush=True)
+        for city in failed_cities:
+            print(f"  - {city}", flush=True)
+    print(f"{'='*70}\n", flush=True)
     
     return sampled_df
 
@@ -341,34 +420,59 @@ def save_results(df: pd.DataFrame, altitude_results: dict, distance_results: dic
 
 def main():
     """Main execution function."""
-    print("="*70)
-    print("BIKENV PREDICTION PLATFORM")
-    print("Testing Altitude and Distance Index Hypotheses")
-    print("Data: Copenhagenize Index 2025 Edition")
-    print("="*70)
+    print("="*70, flush=True)
+    print("BIKENV PREDICTION PLATFORM", flush=True)
+    print("Testing Altitude and Distance Index Hypotheses", flush=True)
+    print("Data: Copenhagenize Index 2025 Edition", flush=True)
+    print("="*70, flush=True)
     
-    # Load data
-    data_path = '../data/copenhagenize_index_2025.csv'
-    df = load_bicycle_index_data(data_path)
-    
-    # Calculate indices for sampled cities
-    df_with_indices = calculate_indices_for_cities(df, sample_size=15)
-    
-    # Test hypotheses
-    altitude_results = test_altitude_hypothesis(df_with_indices)
-    distance_results = test_distance_hypothesis(df_with_indices)
-    
-    # Create visualizations
-    create_visualizations(df_with_indices)
-    
-    # Save results
-    save_results(df_with_indices, altitude_results, distance_results)
-    
-    print("\n" + "="*70)
-    print("ANALYSIS COMPLETE")
-    print("="*70)
-    print("\nResults and visualizations have been saved to the 'results/' directory.")
-    print("Review the plots and statistical summaries to evaluate the hypotheses.")
+    try:
+        # Load data
+        data_path = '../data/copenhagenize_index_2025.csv'
+        print(f"\nLoading data from: {data_path}", flush=True)
+        df = load_bicycle_index_data(data_path)
+        print(f"✓ Loaded {len(df)} cities from index", flush=True)
+        
+        # Calculate indices for sampled cities
+        df_with_indices = calculate_indices_for_cities(df, sample_size=15)
+        
+        # Check if we have enough data to proceed
+        if len(df_with_indices) < 5:
+            print("\n⚠ ERROR: Not enough cities calculated successfully.", flush=True)
+            print(f"Need at least 5 cities, got {len(df_with_indices)}", flush=True)
+            print("Cannot perform statistical analysis.", flush=True)
+            return
+        
+        print(f"\nProceeding with analysis using {len(df_with_indices)} cities...", flush=True)
+        
+        # Test hypotheses
+        print("\n" + "="*70, flush=True)
+        print("TESTING HYPOTHESES", flush=True)
+        print("="*70, flush=True)
+        altitude_results = test_altitude_hypothesis(df_with_indices)
+        distance_results = test_distance_hypothesis(df_with_indices)
+        
+        # Create visualizations
+        create_visualizations(df_with_indices)
+        
+        # Save results
+        save_results(df_with_indices, altitude_results, distance_results)
+        
+        print("\n" + "="*70)
+        print("ANALYSIS COMPLETE")
+        print("="*70)
+        print("\nResults and visualizations have been saved to the 'results/' directory.")
+        print("Review the plots and statistical summaries to evaluate the hypotheses.")
+        
+    except KeyboardInterrupt:
+        print("\n\n⚠ Analysis interrupted by user.")
+        print("Partial results may be available in the results/ directory.")
+        
+    except Exception as e:
+        print(f"\n\n❌ ERROR: {e}")
+        print("Analysis could not be completed.")
+        import traceback
+        traceback.print_exc()
 
 
 if __name__ == "__main__":
