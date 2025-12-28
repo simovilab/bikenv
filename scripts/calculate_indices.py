@@ -10,6 +10,10 @@ import networkx as nx
 import numpy as np
 from typing import Tuple, Optional
 
+# Configure OSMnx to use free Open Topo Data API instead of Google
+ox.settings.elevation_url_template = \
+    "https://api.opentopodata.org/v1/aster30m?locations={locations}"
+
 
 def calculate_altitude_index(city_name: str, country: Optional[str] = None) -> float:
     """
@@ -47,8 +51,8 @@ def calculate_altitude_index(city_name: str, country: Optional[str] = None) -> f
         # Get the road network with elevation data
         G = ox.graph_from_place(query, network_type="bike")
         
-        # Add elevation data to nodes (using SRTM or other elevation APIs)
-        G = ox.add_node_elevations_google(G, api_key=None)  # Will need API key
+        # Add elevation data using free Open Topo Data API (no key needed)
+        G = ox.add_node_elevations_google(G, api_key=None, batch_size=100, pause=0.5)
         
         # Calculate elevation changes for each edge
         elevation_changes = []

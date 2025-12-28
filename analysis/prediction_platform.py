@@ -71,7 +71,9 @@ def calculate_indices_for_cities(df: pd.DataFrame, sample_size: int = 15) -> pd.
             a_i, d_i = calculate_indices_for_city(city, country)
             altitude_indices.append(a_i)
             distance_indices.append(d_i)
-            print(f"  ✓ {city}: A_i={a_i:.3f if a_i else 'N/A'}, D_i={d_i:.3f if d_i else 'N/A'}")
+            a_i_str = f"{a_i:.3f}" if a_i is not None else 'N/A'
+            d_i_str = f"{d_i:.3f}" if d_i is not None else 'N/A'
+            print(f"  ✓ {city}: A_i={a_i_str}, D_i={d_i_str}")
         except Exception as e:
             print(f"  ✗ {city}: Error - {e}")
             altitude_indices.append(None)

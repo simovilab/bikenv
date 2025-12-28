@@ -177,3 +177,7 @@ poetry.toml
 
 # Project specific
 results/
+
+# OSMnx cache (temporary files)
+cache/
+analysis/cache/
