@@ -165,6 +165,13 @@ def calculate_indices_for_city(city_name: str, country: Optional[str] = None) ->
     print(f"Calculating indices for {city_name}...")
     
     altitude_idx = calculate_altitude_index(city_name, country)
+    
+    # If altitude calculation failed, don't attempt distance calculation
+    # (likely same underlying issue - area too large, network problem, etc.)
+    if altitude_idx is None:
+        print(f"  Skipping distance calculation for {city_name} (altitude calculation failed)")
+        return None, None
+    
     distance_idx = calculate_distance_index(city_name, country)
     
     return altitude_idx, distance_idx
