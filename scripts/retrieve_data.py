@@ -11,6 +11,7 @@ Source: https://copenhagenizeindex.eu/
 
 import re
 import csv
+import os
 from typing import List, Dict
 
 
@@ -72,6 +73,12 @@ def save_to_csv(data: List[Dict], output_file: str = "../data/copenhagenize_inde
     if not data:
         print("No data to save")
         return
+    
+    # Correct the output file path to use the correct directory within the bikenv project
+    output_file = os.path.join(os.path.dirname(__file__), '../data/copenhagenize_index_2025.csv')
+
+    # Ensure the directory exists
+    os.makedirs(os.path.dirname(output_file), exist_ok=True)
     
     fieldnames = ["rank", "city", "country", "score"]
     

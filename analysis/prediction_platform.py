@@ -51,6 +51,8 @@ def time_limit(seconds):
 
 def load_bicycle_index_data(filepath: str) -> pd.DataFrame:
     """Load the Copenhagenize Bicycle Cities Index data."""
+    # Ensure the filepath is absolute based on the script's location
+    filepath = os.path.join(os.path.dirname(__file__), '../data/copenhagenize_index_2025.csv')
     df = pd.read_csv(filepath)
     print(f"Loaded {len(df)} cities from the index")
     return df
