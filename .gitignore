@@ -174,3 +174,10 @@ poetry.toml
 .ruff_cache/
 
 # End of https://www.toptal.com/developers/gitignore/api/python
+
+# Project specific
+results/
+
+# OSMnx cache (temporary files)
+cache/
+analysis/cache/
